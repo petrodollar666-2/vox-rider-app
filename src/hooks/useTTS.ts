@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import type { VocabularyItem } from '../App';
 
 interface TTSQueueItem {
@@ -10,12 +10,14 @@ export function useTTS(
   vocabList: VocabularyItem[],
   _currentIndex: number,
   setCurrentIndex: (index: number | ((prev: number) => number)) => void,
-  setIsPlaying: (playing: boolean) => void
+  setIsPlaying: (playing: boolean) => void,
+  voiceURI?: string
 ) {
   const synth = window.speechSynthesis;
   const isPlayingRef = useRef(false);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const wakeLockRef = useRef<any>(null);
+  const [isPaused, setIsPaused] = useState(false);
 
   useEffect(() => {
     // Force load voices
@@ -55,10 +57,16 @@ export function useTTS(
         utterance.lang = item.lang;
         
         const voices = synth.getVoices();
+        
         if (item.lang === 'vi-VN') {
           utterance.voice = voices.find(v => v.lang.includes('vi')) || null;
         } else {
-          utterance.voice = voices.find(v => v.lang.includes('en-US') || v.lang.includes('en-GB')) || null;
+          if (voiceURI) {
+            utterance.voice = voices.find(v => v.voiceURI === voiceURI) || null;
+          }
+          if (!utterance.voice) {
+            utterance.voice = voices.find(v => v.lang.includes('en-US') || v.lang.includes('en-GB')) || null;
+          }
         }
 
         utterance.onend = () => {
@@ -76,17 +84,21 @@ export function useTTS(
     queue.push({ text: word.word, lang: 'en-US' });
     queue.push({ text: word.word, lang: 'en-US' });
 
-    if (word.example && word.exampleMeaning) {
+    if ((word as any).meaning) {
+      queue.push({ text: (word as any).meaning, lang: 'vi-VN' });
+    }
+
+    if (word.example) {
       queue.push({ text: word.example, lang: 'en-US' });
-      queue.push({ text: word.exampleMeaning, lang: 'vi-VN' });
-      queue.push({ text: word.example, lang: 'en-US' });
+    }
+    if (word.exampleMeaning) {
       queue.push({ text: word.exampleMeaning, lang: 'vi-VN' });
     }
 
-    if (word.example2 && word.example2Meaning) {
+    if (word.example2) {
       queue.push({ text: word.example2, lang: 'en-US' });
-      queue.push({ text: word.example2Meaning, lang: 'vi-VN' });
-      queue.push({ text: word.example2, lang: 'en-US' });
+    }
+    if (word.example2Meaning) {
       queue.push({ text: word.example2Meaning, lang: 'vi-VN' });
     }
     return queue;
@@ -94,6 +106,7 @@ export function useTTS(
 
   const playLoop = useCallback(async (startIndex: number) => {
     isPlayingRef.current = true;
+    setIsPaused(false);
     requestWakeLock();
     let i = startIndex;
     while (isPlayingRef.current && vocabList.length > 0) {
@@ -109,13 +122,14 @@ export function useTTS(
     setIsPlaying(false);
     isPlayingRef.current = false;
     releaseWakeLock();
-  }, [vocabList, setCurrentIndex, setIsPlaying]);
+  }, [vocabList, setCurrentIndex, setIsPlaying, voiceURI]);
 
   const togglePlay = (index: number) => {
     if (isPlayingRef.current) {
       synth.cancel();
       isPlayingRef.current = false;
       setIsPlaying(false);
+      setIsPaused(false);
       releaseWakeLock();
     } else {
       if (vocabList.length === 0) return;
@@ -127,8 +141,19 @@ export function useTTS(
     synth.cancel();
     isPlayingRef.current = false;
     setIsPlaying(false);
+    setIsPaused(false);
     releaseWakeLock();
   };
 
-  return { togglePlay, stop, isPlayingRef };
+  const pause = () => {
+    synth.pause();
+    setIsPaused(true);
+  };
+
+  const resume = () => {
+    synth.resume();
+    setIsPaused(false);
+  };
+
+  return { togglePlay, stop, pause, resume, isPlayingRef, isPaused };
 }

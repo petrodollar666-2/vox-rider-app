@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTTS } from './hooks/useTTS';
 import { IELTS_DATA } from './data/ielts';
 import { TOPICS_DATA } from './data/topics';
@@ -23,9 +23,15 @@ const DEFAULT_MOCK_DATA: VocabularyItem[] = [
   { id: '5', word: 'Helmet', type: 'noun', meaning: 'Mũ bảo hiểm', example: 'Wear your helmet.', exampleMeaning: 'Đội mũ bảo hiểm vào.', example2: 'My helmet is black.', example2Meaning: 'Mũ bảo hiểm của tôi màu đen.' }
 ];
 
+const ieltsTopics = Array.from({ length: Math.ceil(IELTS_DATA.length / 30) }, (_, i) => {
+  const start = i * 30;
+  const end = Math.min(start + 30, IELTS_DATA.length);
+  return `IELTS (Từ ${start + 1}-${end})`;
+});
+
 const PRESET_TOPICS = [
   'Giao thông & Đi đường',
-  'Bộ 145 từ vựng IELTS của tôi',
+  ...ieltsTopics,
   'Giao tiếp công sở',
   'Đời sống hàng ngày',
 ];
@@ -38,13 +44,38 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'cards' | 'custom'>('cards');
+  const [searchTopic, setSearchTopic] = useState<string>('');
 
-  const { togglePlay, stop, isPlayingRef } = useTTS(vocabList, currentIndex, setCurrentIndex, setIsPlaying);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState<string>('');
+
+  useEffect(() => {
+    const loadVoices = () => {
+      setVoices(window.speechSynthesis.getVoices());
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }, []);
+
+  const { togglePlay, stop, isPaused, pause, resume } = useTTS(
+    vocabList, 
+    currentIndex, 
+    setCurrentIndex, 
+    setIsPlaying,
+    selectedVoice
+  );
 
   const handleTogglePlay = () => {
     if (vocabList.length === 0) return;
-    setIsPlaying(!isPlayingRef.current);
-    togglePlay(currentIndex);
+    if (isPlaying) {
+      if (isPaused) {
+        resume();
+      } else {
+        pause();
+      }
+    } else {
+      togglePlay(currentIndex);
+    }
   };
 
   const handleShuffleVocab = () => {
@@ -55,20 +86,29 @@ export default function App() {
     setActiveTab('cards');
   };
 
-  const handleChangeTopic = () => {
+  const handleSelectTopic = (nextTopic: string) => {
     stop();
-    const nextIndex = (PRESET_TOPICS.indexOf(topic) + 1) % PRESET_TOPICS.length;
-    const nextTopic = PRESET_TOPICS[nextIndex];
     setTopic(nextTopic);
     
-    if (nextTopic === 'Bộ 145 từ vựng IELTS của tôi') {
-      setVocabList(IELTS_DATA);
+    if (nextTopic.startsWith('IELTS')) {
+      const match = nextTopic.match(/Từ (\d+)-(\d+)/);
+      if (match) {
+        const start = parseInt(match[1]) - 1;
+        const end = parseInt(match[2]);
+        setVocabList(IELTS_DATA.slice(start, end));
+      }
     } else if (nextTopic === 'Giao thông & Đi đường') {
       setVocabList(DEFAULT_MOCK_DATA);
     } else {
       setVocabList(TOPICS_DATA[nextTopic] || []);
     }
     setCurrentIndex(0);
+    setSearchTopic('');
+  };
+
+  const handleChangeTopic = () => {
+    const nextIndex = (PRESET_TOPICS.indexOf(topic) + 1) % PRESET_TOPICS.length;
+    handleSelectTopic(PRESET_TOPICS[nextIndex]);
   };
   
   const handleNextWord = () => {
@@ -100,6 +140,8 @@ export default function App() {
     }
   };
 
+  const filteredTopics = PRESET_TOPICS.filter(t => t.toLowerCase().includes(searchTopic.toLowerCase()));
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none antialiased">
       <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30 px-4 py-3">
@@ -117,30 +159,87 @@ export default function App() {
       </header>
 
       <main className="flex-1 max-w-2xl w-full mx-auto p-4 flex flex-col gap-5">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-lg">
-          <div>
-            <span className="text-xs uppercase font-bold tracking-widest text-slate-400">Chủ đề:</span>
-            <p className="text-lg md:text-xl font-extrabold text-amber-300 mt-0.5">{topic}</p>
+        
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-xs uppercase font-bold tracking-widest text-slate-400">Chủ đề hiện tại:</span>
+              <p className="text-lg md:text-xl font-extrabold text-amber-300 mt-0.5">{topic}</p>
+            </div>
+            <span className="px-3 py-1 bg-slate-800 rounded-full text-xs font-bold text-slate-300">
+              {vocabList.length} từ
+            </span>
           </div>
-          <span className="px-3 py-1 bg-slate-800 rounded-full text-xs font-bold text-slate-300">
-            {vocabList.length} từ
-          </span>
+          
+          <input
+             type="text"
+             placeholder="Tìm kiếm chủ đề..."
+             value={searchTopic}
+             onChange={e => setSearchTopic(e.target.value)}
+             className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl p-2.5 text-sm text-slate-200 outline-none transition"
+          />
+          {searchTopic && (
+             <div className="max-h-40 overflow-y-auto flex flex-col gap-1 mt-2">
+                {filteredTopics.map(t => (
+                  <button
+                    key={t}
+                    onClick={() => handleSelectTopic(t)}
+                    className={`text-left px-3 py-2 rounded-lg text-sm font-semibold transition ${topic === t ? 'bg-emerald-900/50 text-emerald-400' : 'hover:bg-slate-800 text-slate-300'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+                {filteredTopics.length === 0 && (
+                  <div className="text-sm text-slate-500 p-2">Không tìm thấy chủ đề phù hợp</div>
+                )}
+             </div>
+          )}
+        </div>
+
+        <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+          <label className="text-xs uppercase font-bold tracking-widest text-slate-400 mb-2 block">
+            Giọng đọc (Voice):
+          </label>
+          <select
+            value={selectedVoice}
+            onChange={(e) => setSelectedVoice(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl p-2.5 text-sm text-slate-200 outline-none transition"
+          >
+            <option value="">-- Mặc định (Tự động chọn) --</option>
+            {voices.map((voice) => (
+              <option key={voice.voiceURI} value={voice.voiceURI}>
+                {voice.name} ({voice.lang})
+              </option>
+            ))}
+          </select>
         </div>
 
         <section className="w-full">
           <button
             onClick={handleTogglePlay}
             className={`w-full py-8 md:py-10 rounded-3xl font-black text-3xl md:text-4xl shadow-2xl flex flex-col items-center justify-center gap-2 transition-all transform active:scale-95 duration-150 border-4 ${
-              isPlaying
+              isPlaying && !isPaused
                 ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-rose-900/50 animate-pulse'
+                : isPlaying && isPaused
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-300 shadow-amber-950/70'
                 : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-emerald-300 shadow-emerald-950/70'
             }`}
           >
             <div className="flex items-center gap-4">
-              {isPlaying ? <span>DỪNG LẠI</span> : <span>BẤM ĐỂ NGHE (LOOP)</span>}
+              {isPlaying && !isPaused ? (
+                <span>TẠM DỪNG (PAUSE)</span>
+              ) : isPlaying && isPaused ? (
+                <span>TIẾP TỤC (RESUME)</span>
+              ) : (
+                <span>BẤM ĐỂ NGHE (LOOP)</span>
+              )}
             </div>
             <span className="text-sm font-semibold tracking-wide opacity-90">
-              {isPlaying ? `Đang phát từ ${currentIndex + 1}/${vocabList.length}: ${vocabList[currentIndex]?.word || ''}` : 'Chạm 1 lần để nghe liên tục'}
+              {isPlaying && !isPaused 
+                ? `Đang phát từ ${currentIndex + 1}/${vocabList.length}: ${vocabList[currentIndex]?.word || ''}` 
+                : isPlaying && isPaused
+                ? `Đã tạm dừng. Bấm để phát tiếp`
+                : 'Chạm 1 lần để nghe liên tục'}
             </span>
           </button>
         </section>
